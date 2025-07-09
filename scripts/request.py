@@ -7,7 +7,7 @@ from pathlib import Path
 from time import time
 from typing import Any, List
 
-from common import LINE_RE
+from common import LINE_RE, NUMBER_RE
 from manager import CacheManager, RequestManager
 from parsers import ContentParser, HTMLParser, Parser, WordParser
 
@@ -74,6 +74,61 @@ class LawParser(object):
             return True
         return False
 
+    def _add_markers_to_filedata(self, filedata: List[str]) -> List[str]:
+        new_ret = []
+        open_levels = [] # stack to keep track of open sections/chapters
+        article_open = False # to track if an article is open
+
+        # This regex will match "第X条"
+        article_re = f"^第{NUMBER_RE}+条"
+
+        for line in filedata:
+            current_level = 0
+            is_article = bool(re.match(article_re, line))
+
+            if line.startswith('## '):
+                current_level = 2
+            elif line.startswith('### '):
+                current_level = 3
+
+            # If we are starting a new section/chapter
+            if current_level > 0:
+                if article_open:
+                    new_ret.append('<!-- ARTICLE END -->')
+                    article_open = False
+                
+                # Close any open sections that are of a higher or equal level
+                while open_levels and open_levels[-1] >= current_level:
+                    level = open_levels.pop()
+                    if level == 2:
+                        new_ret.append('<!-- CHAPTER END -->')
+                    elif level == 3:
+                        new_ret.append('<!-- SECTION END -->')
+                
+                # Now, open the new section/chapter
+                open_levels.append(current_level)
+            
+            # If we are starting a new article
+            if is_article:
+                if article_open:
+                    new_ret.append('<!-- ARTICLE END -->')
+                article_open = True
+
+
+            new_ret.append(line)
+
+        # Close any remaining open sections/articles at the end of the file
+        if article_open:
+            new_ret.append('<!-- ARTICLE END -->')
+        while open_levels:
+            level = open_levels.pop()
+            if level == 2:
+                new_ret.append('<!-- CHAPTER END -->')
+            elif level == 3:
+                new_ret.append('<!-- SECTION END -->')
+            
+        return new_ret
+
     def parse_law(self, item):
         detail = self.request.get_law_detail(item["id"])
         result = detail["result"]
@@ -97,6 +152,8 @@ class LawParser(object):
             filedata = self.content_parser.parse(result, title, desc, content)
             if not filedata:
                 continue
+            
+            filedata = self._add_markers_to_filedata(filedata)
 
             output_path = level / self.__get_law_output_path(title, item["publish"])
             logger.debug(f"parsing {title} success")
@@ -110,6 +167,9 @@ class LawParser(object):
         filedata = self.content_parser.parse(result, title, data[1], data[2:])
         if not filedata:
             return
+        
+        filedata = self._add_markers_to_filedata(filedata)
+
         output_path = self.__get_law_output_path(title, publish_at)
         logger.debug(f"parsing {title} success")
         self.cache.write_law(output_path, filedata)
@@ -144,8 +204,13 @@ class LawParser(object):
             yield from arr
 
     def run(self):
-        for i in range(1, 5):
-            ret = self.request.getLawList(i)
+        last_update_time = time()
+        page = 1
+        while True:
+            if time() - last_update_time > 5:
+                logger.info("No new laws found in 5 seconds, exiting.")
+                break
+            ret = self.request.getLawList(page)
             arr = ret["result"]["data"]
             if len(arr) == 0:
                 break
@@ -157,8 +222,10 @@ class LawParser(object):
                 # if item["status"] == "9":
                 # continue
                 self.parse_law(item)
+                last_update_time = time()
                 if self.spec_title is not None:
                     exit(1)
+            page += 1
 
     def remove_duplicates(self):
         p = self.cache.OUTPUT_PATH
@@ -181,7 +248,7 @@ def main():
     req.request.searchType = "1,3"
     # req.request.searchType = 'title;vague'
     req.request.params = [
-        # ("type", "公安部规章")
+        # ("type", "公安部规章"),
         # ("xlwj", ["02", "03", "04", "05", "06", "07", "08"]),  # 法律法规
         # ("xlwj", ["07"]),
         #  ("fgbt", "消防法"),
@@ -189,7 +256,7 @@ def main():
         # ('type', 'sfjs'),
         # ("zdjg", "4028814858a4d78b0158a50f344e0048&4028814858a4d78b0158a50fa2ba004c"), #北京
         # ("zdjg", "4028814858b9b8e50158bed591680061&4028814858b9b8e50158bed64efb0065"), #河南
-        ("zdjg", "4028814858b9b8e50158bec45e9a002d&4028814858b9b8e50158bec500350031"), # 上海
+        # ("zdjg", "4028814858b9b8e50158bec45e9a002d&4028814858b9b8e50158bec500350031"), # 上海
         # ("zdjg", "4028814858b9b8e50158bec5c28a0035&4028814858b9b8e50158bec6abbf0039"), # 江苏
         # ("zdjg", "4028814858b9b8e50158bec7c42f003d&4028814858b9b8e50158beca3c590041"), # 浙江
         # ("zdjg", "4028814858b9b8e50158bed40f6d0059&4028814858b9b8e50158bed4987a005d"),  # 山东
@@ -210,8 +277,8 @@ def main():
         req.run()
     except KeyboardInterrupt:
         logger.info("keyboard interrupt")
-    finally:
-        req.remove_duplicates()
+    # finally:
+    #     req.remove_duplicates()
 
 
 if __name__ == "__main__":
