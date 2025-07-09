@@ -94,16 +94,14 @@ class LawParser(object):
             # If we are starting a new section/chapter
             if current_level > 0:
                 if article_open:
-                    new_ret.append('<!-- ARTICLE END -->')
+                    new_ret.append('*小节结束*')
                     article_open = False
                 
                 # Close any open sections that are of a higher or equal level
                 while open_levels and open_levels[-1] >= current_level:
                     level = open_levels.pop()
-                    if level == 2:
-                        new_ret.append('<!-- CHAPTER END -->')
-                    elif level == 3:
-                        new_ret.append('<!-- SECTION END -->')
+                    if level == 2 or level == 3:
+                        new_ret.append('*章节结束*')
                 
                 # Now, open the new section/chapter
                 open_levels.append(current_level)
@@ -111,7 +109,7 @@ class LawParser(object):
             # If we are starting a new article
             if is_article:
                 if article_open:
-                    new_ret.append('<!-- ARTICLE END -->')
+                    new_ret.append('*小节结束*')
                 article_open = True
 
 
@@ -119,13 +117,11 @@ class LawParser(object):
 
         # Close any remaining open sections/articles at the end of the file
         if article_open:
-            new_ret.append('<!-- ARTICLE END -->')
+            new_ret.append('*小节结束*')
         while open_levels:
             level = open_levels.pop()
-            if level == 2:
-                new_ret.append('<!-- CHAPTER END -->')
-            elif level == 3:
-                new_ret.append('<!-- SECTION END -->')
+            if level == 2 or level == 3:
+                new_ret.append('*章节结束*')
             
         return new_ret
 
