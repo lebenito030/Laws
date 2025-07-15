@@ -26,8 +26,10 @@ class CacheManager(object):
             p.mkdir(parents=True)
         return p / key
 
-    def is_exists(self, key: str, type: CacheType, filetype=None):
+    def is_exists(self, key: str, type: CacheType, filetype=None, create_if_not_exists=False):
         full_path = self.path(key, type, filetype)
+        if create_if_not_exists and not full_path.parent.exists():
+            full_path.parent.mkdir(parents=True)
         return full_path.exists(), full_path
 
     def get(self, key: str, type: CacheType, filetype=None):

@@ -76,8 +76,8 @@ class LawParser(object):
 
     def _add_markers_to_filedata(self, filedata: List[str]) -> List[str]:
         new_ret = []
-        open_levels = [] # stack to keep track of open sections/chapters
-        article_open = False # to track if an article is open
+        open_levels = []  # stack to keep track of open sections/chapters
+        article_open = False  # to track if an article is open
 
         # This regex will match "第X条"
         article_re = f"^第{NUMBER_RE}+条"
@@ -96,22 +96,21 @@ class LawParser(object):
                 if article_open:
                     new_ret.append('*小节结束*')
                     article_open = False
-                
+
                 # Close any open sections that are of a higher or equal level
                 while open_levels and open_levels[-1] >= current_level:
                     level = open_levels.pop()
                     if level == 2 or level == 3:
                         new_ret.append('*章节结束*')
-                
+
                 # Now, open the new section/chapter
                 open_levels.append(current_level)
-            
+
             # If we are starting a new article
             if is_article:
                 if article_open:
                     new_ret.append('*小节结束*')
                 article_open = True
-
 
             new_ret.append(line)
 
@@ -122,7 +121,7 @@ class LawParser(object):
             level = open_levels.pop()
             if level == 2 or level == 3:
                 new_ret.append('*章节结束*')
-            
+
         return new_ret
 
     def parse_law(self, item):
@@ -137,7 +136,8 @@ class LawParser(object):
             return
 
         for target_file in files:
-            parser: Parser = find(lambda x: x == target_file["type"], self.parser)
+            parser: Parser = find(
+                lambda x: x == target_file["type"], self.parser)
 
             ret = parser.parse(result, target_file)
             if not ret:
@@ -148,22 +148,24 @@ class LawParser(object):
             filedata = self.content_parser.parse(result, title, desc, content)
             if not filedata:
                 continue
-            
+
             filedata = self._add_markers_to_filedata(filedata)
 
-            output_path = level / self.__get_law_output_path(title, item["publish"])
+            output_path = level / \
+                self.__get_law_output_path(title, item["publish"])
             logger.debug(f"parsing {title} success")
             self.cache.write_law(output_path, filedata)
 
     def parse_file(self, file_path, publish_at=None):
         result = {}
         with open(file_path, "r") as f:
-            data = list(filter(lambda x: x, map(lambda x: x.strip(), f.readlines())))
+            data = list(filter(lambda x: x, map(
+                lambda x: x.strip(), f.readlines())))
         title = data[0]
         filedata = self.content_parser.parse(result, title, data[1], data[2:])
         if not filedata:
             return
-        
+
         filedata = self._add_markers_to_filedata(filedata)
 
         output_path = self.__get_law_output_path(title, publish_at)
@@ -203,6 +205,7 @@ class LawParser(object):
         last_update_time = time()
         page = 1
         while True:
+            logger.info(f"page is {page}")
             if time() - last_update_time > 5:
                 logger.info("No new laws found in 5 seconds, exiting.")
                 break
@@ -228,7 +231,8 @@ class LawParser(object):
         lookup = Path("../")
         for file_path in p.glob("*.md"):
             lookup_files = lookup.glob(f"**/**/{file_path.name}")
-            lookup_files = filter(lambda x: "scripts" not in x.parts, lookup_files)
+            lookup_files = filter(
+                lambda x: "scripts" not in x.parts, lookup_files)
             lookup_files = list(lookup_files)
             if len(lookup_files) > 0:
                 os.remove(file_path)
@@ -244,6 +248,9 @@ def main():
     req.request.searchType = "1,3"
     # req.request.searchType = 'title;vague'
     req.request.params = [
+        # ("type", ""),
+        # ("xlwj", ["01", "02", "03", "04", "05", "06", "07", "08", "fljs", "flwj", "flxz"]),
+        # ("fgxlwj", ["xzfg", "jcfg", "0602", "0601", "0603", "0903"]),
         # ("type", "公安部规章"),
         # ("xlwj", ["02", "03", "04", "05", "06", "07", "08"]),  # 法律法规
         # ("xlwj", ["07"]),
@@ -261,10 +268,10 @@ def main():
         #     "zdjg",
         #     "4028814858b9b8e50158beda43a50079&4028814858b9b8e50158bedab7ea007d",
         # ),  # 广东
-        # (
-        #     "zdjg",
-        #     "4028814858b9b8e50158bee5863c0091&4028814858b9b8e50158bee9a3aa0095",
-        # )  # 重庆
+        (
+            "zdjg",
+            "4028814858b9b8e50158bee5863c0091&4028814858b9b8e50158bee9a3aa0095",
+        )  # 重庆
     ]
     # req.request.req_time = 1647659481879
     req.request.req_time = int(time() * 1000)

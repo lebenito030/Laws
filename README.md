@@ -20,6 +20,8 @@ draft: true
 
 `scripts` 目录下有一 `request.py` 脚本，支持从 [国家法律法规数据库](https://flk.npc.gov.cn) 爬取最新的法律法规。
 
+**注意:** 此脚本现在支持自动将 `.doc` 文件转换为 `.docx` 格式进行处理。这需要您的系统上安装了 **unoconv**。在 Arch Linux 上，您可以通过 `sudo pacman -S unoconv` 来安装。
+
 在 `scripts` 目录下，执行以下指令
 
  - `python requessts.py` （脚本会自动处理，将新增法律加入列表以及合适的位置）

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import urllib.request
 from hashlib import sha1
 from pathlib import Path
@@ -99,25 +100,67 @@ class RequestManager(object):
         _, file_extension = os.path.splitext(filename)
 
         title = title_or_output_path.name
-        parent_path = title_or_output_path.parent
 
-        ok, path = self.cache.is_exists(title, CacheType.WordDocument, file_extension)
+        # Always check for the docx version in cache first
+        ok, path = self.cache.is_exists(title, CacheType.WordDocument, ".docx")
+
         if not ok:
-            if not re.match(".*docx$", filename):
-                return None
-
+            # If not in cache, download the file
             logger.debug(f"getting law word file {url}")
             url = "https://wb.flk.npc.gov.cn" + url
 
+            # Determine download path based on original extension
+            _, download_path = self.cache.is_exists(
+                title, CacheType.WordDocument, file_extension, create_if_not_exists=True
+            )
+
             try:
-                urllib.request.urlretrieve(url, path)
+                urllib.request.urlretrieve(url, download_path)
                 sleep(1)
             except Exception as e:
-                logger.error(e)
+                logger.error(f"Failed to download {url}: {e}")
                 return None
+
+            # If it's a .doc file, convert it to .docx
+            if file_extension == ".doc":
+                logger.info(f"Converting {download_path} to .docx")
+                try:
+                    # Using unoconv for conversion
+                    output_path = download_path.with_suffix(".docx")
+                    subprocess.run(
+                        [
+                            "unoconv",
+                            "-f",
+                            "docx",
+                            "-o",
+                            str(output_path),
+                            str(download_path),
+                        ],
+                        check=True,
+                    )
+                    path = output_path
+                    if not path.exists():
+                        logger.error(f"Conversion failed, {path} not found.")
+                        return None
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    logger.error(f"Error during .doc to .docx conversion: {e}")
+                    logger.error(
+                        "Please ensure 'unoconv' is installed and in your PATH."
+                    )
+                    return None
+            elif file_extension == ".docx":
+                path = download_path
+            else:
+                logger.warning(f"Unsupported file type: {file_extension}")
+                return None
+
+        if not path or not path.exists():
+            logger.error(f"File not found at path: {path}")
+            return None
 
         with open(path, "rb") as f:
             try:
                 return Document(f)
-            except:
+            except Exception as e:
+                logger.error(f"Failed to open document {path}: {e}")
                 return None

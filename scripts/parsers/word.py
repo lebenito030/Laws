@@ -62,10 +62,6 @@ class WordParser(Parser):
 
     def parse_document(self, document, title):
         if not isinstance(document, _Document):
-            with open(document, "rb") as f:
-                document = Document(f)
-
-        if not isinstance(document, _Document):
             raise Exception("document is not a _Document")
 
         desc = ""
