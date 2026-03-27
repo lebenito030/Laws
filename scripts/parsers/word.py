@@ -50,12 +50,12 @@ class WordParser(Parser):
                 yield Table(child, parent)
 
     def parse(self, result, detail) -> Tuple[str, str, List[str]]:
-        level = result["level"].strip()
+        level = result["flxz"].strip()
         title = result["title"].strip()
 
-        document = self.request.get_word(detail["path"], Path(level) / title)
+        document = self.request.get_word(detail["bbbs"], Path(level) / title)
         if not document:
-            logger.warning(f"document {detail['path']} not exists")
+            logger.warning(f"document {detail['bbbs']} not exists")
             return
 
         return self.parse_document(document, title)

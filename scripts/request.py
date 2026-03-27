@@ -9,7 +9,7 @@ from typing import Any, List
 
 from common import LINE_RE, NUMBER_RE
 from manager import CacheManager, RequestManager
-from parsers import ContentParser, HTMLParser, Parser, WordParser
+from parsers import ContentParser, WordParser
 
 logger = logging.getLogger("Law")
 logger.setLevel(logging.DEBUG)
@@ -40,31 +40,10 @@ class LawParser(object):
     def __init__(self) -> None:
         self.request = RequestManager()
         self.spec_title = None
-        self.parser = [
-            HTMLParser(),
-            WordParser(),
-        ]
+        self.parser = WordParser()
         self.content_parser = ContentParser()
         self.cache = CacheManager()
         self.categories = []
-
-    def __reorder_files(self, files):
-        # 必须有 parser
-        files = list(
-            filter(
-                lambda x: x["type"] in self.parser,
-                files,
-            )
-        )
-
-        if len(files) == 0:
-            return []
-
-        if len(files) > 1:
-            # 按照 parser 的位置排序， 优先使用级别
-            files = sorted(files, key=lambda x: self.parser.index(x["type"]))
-
-        return files
 
     def is_bypassed_law(self, item) -> bool:
         title = item["title"].replace("中华人民共和国", "")
@@ -124,37 +103,41 @@ class LawParser(object):
 
         return new_ret
 
-    def parse_law(self, item):
-        detail = self.request.get_law_detail(item["id"])
-        result = detail["result"]
+    def parse_law(self, item) -> bool:
+        detail = self.request.get_law_detail(item["bbbs"])
+        if detail.get("code") != 200:
+            logger.error(f"get detail failed for {item['title']}: {detail}")
+            return False
+        result = detail["data"]
         title = result["title"]
-        # 类别
-        level = result["level"]
-        files = self.__reorder_files(result["body"])
+        level = Path(result["flxz"])
+
+        output_path = level / self.__get_law_output_path(title, item.get("gbrq", ""))
+        if (self.cache.OUTPUT_PATH / output_path).exists():
+            logger.debug(f"skip existing {title}")
+            return False
+
         logger.debug(f"parsing {title}")
-        if len(files) == 0:
-            return
 
-        for target_file in files:
-            parser: Parser = find(
-                lambda x: x == target_file["type"], self.parser)
+        if not result.get("ossFile", {}).get("ossWordPath"):
+            logger.warning(f"no word file for {title}")
+            return False
 
-            ret = parser.parse(result, target_file)
-            if not ret:
-                logger.error(f"parsing {title} error")
-                continue
-            _, desc, content = ret
+        ret = self.parser.parse(result, {"bbbs": item["bbbs"]})
+        if not ret:
+            logger.error(f"parsing {title} error")
+            return False
+        _, desc, content = ret
 
-            filedata = self.content_parser.parse(result, title, desc, content)
-            if not filedata:
-                continue
+        filedata = self.content_parser.parse(result, title, desc, content)
+        if not filedata:
+            return False
 
-            filedata = self._add_markers_to_filedata(filedata)
+        filedata = self._add_markers_to_filedata(filedata)
 
-            output_path = level / \
-                self.__get_law_output_path(title, item["publish"])
-            logger.debug(f"parsing {title} success")
-            self.cache.write_law(output_path, filedata)
+        logger.debug(f"parsing {title} success")
+        self.cache.write_law(output_path, filedata)
+        return True
 
     def parse_file(self, file_path, publish_at=None):
         result = {}
@@ -196,7 +179,7 @@ class LawParser(object):
     def lawList(self):
         for i in range(1, 60):
             ret = self.request.getLawList(i)
-            arr = ret["result"]["data"]
+            arr = ret.get("rows", [])
             if len(arr) == 0:
                 break
             yield from arr
@@ -210,18 +193,14 @@ class LawParser(object):
                 logger.info("No new laws found in 5 seconds, exiting.")
                 break
             ret = self.request.getLawList(page)
-            arr = ret["result"]["data"]
+            arr = ret.get("rows", [])
             if len(arr) == 0:
                 break
             for item in arr:
-                if "publish" in item and item["publish"]:
-                    item["publish"] = item["publish"].split(" ")[0]
                 if self.is_bypassed_law(item):
                     continue
-                # if item["status"] == "9":
-                # continue
-                self.parse_law(item)
-                last_update_time = time()
+                if self.parse_law(item):
+                    last_update_time = time()
                 if self.spec_title is not None:
                     exit(1)
             page += 1
@@ -243,45 +222,29 @@ def main():
     req = LawParser()
     args = sys.argv[1:]
     if args:
-        req.parse_file(args[0], args[1])
+        req.parse_file(args[0], args[1] if len(args) > 1 else None)
         return
-    req.request.searchType = "1,3"
-    # req.request.searchType = 'title;vague'
-    req.request.params = [
-        # ("type", ""),
-        # ("xlwj", ["01", "02", "03", "04", "05", "06", "07", "08", "fljs", "flwj", "flxz"]),
-        # ("fgxlwj", ["xzfg", "jcfg", "0602", "0601", "0603", "0903"]),
-        # ("type", "公安部规章"),
-        # ("xlwj", ["02", "03", "04", "05", "06", "07", "08"]),  # 法律法规
-        # ("xlwj", ["07"]),
-        #  ("fgbt", "消防法"),
-        ("fgxlwj", "xzfg"),  # 行政法规
-        # ('type', 'sfjs'),
-        # ("zdjg", "4028814858a4d78b0158a50f344e0048&4028814858a4d78b0158a50fa2ba004c"), #北京
-        # ("zdjg", "4028814858b9b8e50158bed591680061&4028814858b9b8e50158bed64efb0065"), #河南
-        # ("zdjg", "4028814858b9b8e50158bec45e9a002d&4028814858b9b8e50158bec500350031"), # 上海
-        # ("zdjg", "4028814858b9b8e50158bec5c28a0035&4028814858b9b8e50158bec6abbf0039"), # 江苏
-        # ("zdjg", "4028814858b9b8e50158bec7c42f003d&4028814858b9b8e50158beca3c590041"), # 浙江
-        # ("zdjg", "4028814858b9b8e50158bed40f6d0059&4028814858b9b8e50158bed4987a005d"),  # 山东
-        # ("zdjg", "4028814858b9b8e50158bef1d72600b9&4028814858b9b8e50158bef2706800bd"), # 陕西省
-        # (
-        #     "zdjg",
-        #     "4028814858b9b8e50158beda43a50079&4028814858b9b8e50158bedab7ea007d",
-        # ),  # 广东
-        (
-            "zdjg",
-            "4028814858b9b8e50158bee5863c0091&4028814858b9b8e50158bee9a3aa0095",
-        )  # 重庆
-    ]
-    # req.request.req_time = 1647659481879
-    req.request.req_time = int(time() * 1000)
+    # 过滤示例（注释掉表示抓取全部）：
+    # --- flfgCodeId（法律法规分类）---
+    # 全部国家法律法规（不含地方）:
+    req.request.flfgCodeId += [100,101,102,110,120,130,140,150,155,160,170,180,190,195,200,201,210,215,220,320,330,340,350]
+    req.request.flfgCodeId += [110, 120, 130, 140, 150, 155, 160, 170]  # 全部法律
+    req.request.flfgCodeId += [210]          # 行政法规
+    req.request.flfgCodeId += [320, 330, 340]  # 司法解释
+    req.request.flfgCodeId += [230, 300, 310]  # 地方法规（含废止决定）
+    # --- zdjgCodeId（制定机关）---
+    # 90=全国人大, 100=全国人大常委会, 110=全国人大各委, 120=国务院,
+    # 130=国家监察委, 140=最高人民法院, 150=最高人民检察院
+    # 380=重庆市人大, 其他地方人大见网页过滤器
+    # --- 重庆地方法规示例 ---
+    req.request.flfgCodeId += [230, 300, 310]
+    req.request.zdjgCodeId = [380]
+    # req.request.searchContent = "消防法"    # 关键词搜索
     # req.spec_title = "反有组织犯罪法"
     try:
         req.run()
     except KeyboardInterrupt:
         logger.info("keyboard interrupt")
-    # finally:
-    #     req.remove_duplicates()
 
 
 if __name__ == "__main__":
